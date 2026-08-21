@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cuadro Semanal - Celular Kits</title>
+    
+    <!-- Firebase App (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    <!-- SheetJS para Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+
+        :root {
+            --primary: #0b0f19;
+            --secondary: #161f30;
+            --accent: #ff6600;
+            --border: #243147;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: var(--primary); color: var(--text); margin: 0; padding: 0; }
+        
+        /* --- Pantalla de Login --- */
+        #loginScreen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(11, 15, 25, 0.95); backdrop-filter: blur(10px);
+            display: flex; justify-content: center; align-items: center; z-index: 2000;
+        }
+        .login-card { background: var(--secondary); padding: 40px; border-radius: 16px; border: 1px solid var(--border); width: 100%; max-width: 350px; text-align: center; }
+        .login-card h2 { color: var(--accent); margin-bottom: 20px; font-weight: 800; }
+        .login-card input { width: 100%; padding: 12px; margin-bottom: 15px; border-radius: 8px; border: 1px solid var(--border); background: var(--primary); color: white; box-sizing: border-box;}
+        
+        /* --- Interfaz Principal --- */
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; display: none; }
+        .header { display: flex; justify-content: space-between; align-items: center; background: var(--secondary); padding: 15px 25px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border); gap: 15px; flex-wrap: wrap; }
+        
+        .header-logo { height: 45px; object-fit: contain; }
+        
+        .week-selector { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 1.1rem; }
+        .week-selector input { width: 70px; font-size: 1.1rem; font-weight: bold; text-align: center; background: var(--primary); color: white; border: 1px solid var(--accent); border-radius: 8px; padding: 5px; }
+        
+        .btn { padding: 10px 16px; border-radius: 8px; font-weight: 700; cursor: pointer; border: none; color: white; transition: 0.2s; }
+        .btn-orange { background: var(--accent); } .btn-orange:hover { background: #e05500; }
+        .btn-green { background: #10b981; } .btn-green:hover { background: #059669; }
+        .btn-gray { background: #475569; } .btn-gray:hover { background: #334155; }
+        
+        /* --- Tabla --- */
+        table { width: 100%; border-collapse: collapse; background: var(--secondary); border-radius: 12px; overflow: hidden; font-size: 0.85rem; }
+        th, td { border: 1px solid var(--border); padding: 0; text-align: center; }
+        th { background: #0f172a; padding: 12px 8px; color: var(--text-muted); text-transform: uppercase; font-size: 0.75rem; font-weight: 800; }
+        
+        input[type="text"], select { width: 100%; height: 100%; padding: 12px 8px; border: none; background: transparent; color: var(--text); text-align: center; outline: none; box-sizing: border-box; font-family: inherit; font-weight: 600; }
+        input:focus, select:focus { background: rgba(255, 102, 0, 0.1); }
+        input:disabled, select:disabled { opacity: 0.7; cursor: not-allowed; }
+        
+        .is-descanso { background-color: rgba(16, 185, 129, 0.2) !important; color: #34d399 !important; }
+        
+        /* Contenedor POS con Logo Dinámico */
+        .pos-cell-container { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; height: 100%; }
+        .pos-logo-mini { width: 24px; height: 24px; object-fit: contain; border-radius: 4px; background: white; padding: 2px; flex-shrink: 0; }
+
+        /* --- Panel Admin --- */
+        #adminPanel { display: none; background: var(--secondary); padding: 20px; border-radius: 12px; border: 1px solid var(--accent); margin-bottom: 20px; }
+        .admin-form { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+        
+        /* Impresión */
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white; color: black; }
+            .container { padding: 0; }
+            table, th, td, input, select { border-color: #ccc; color: black; background: white; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Pantalla de Login -->
+    <div id="loginScreen">
+        <div class="login-card">
+            <img src="celular-kits.png" alt="Celular Kits" style="max-width: 180px; margin-bottom: 15px;" onerror="this.style.display='none'">
+            <h2>Acceso a Horarios</h2>
+            <input type="text" id="loginUser" placeholder="Usuario (ej. admin, nomina)">
+            <input type="password" id="loginPass" placeholder="Contraseña">
+            <button class="btn btn-orange" style="width: 100%;" onclick="iniciarSesion()">Ingresar</button>
+            <p id="loginError" style="color: #ef4444; font-size: 0.85rem; display: none; margin-top: 10px;">Credenciales incorrectas</p>
+        </div>
+    </div>
+
+    <!-- Contenedor Principal -->
+    <div class="container" id="mainContainer">
+        
+        <div class="header">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <img src="celular-kits.png" alt="Celular Kits" class="header-logo" onerror="this.style.display='none'">
+                <div>
+                    <h1 style="font-size: 1.3rem;">CUADRO DE TRABAJO</h1>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
+                        Usuario: <strong id="currentUserDisplay" style="color:var(--accent);">--</strong>
+                        <span id="roleDisplay" style="margin-left: 8px; padding: 2px 6px; background: #334155; border-radius: 4px; font-size: 0.65rem;"></span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="week-selector">
+                Semana 
+                <input type="number" id="inputSemana" min="1" max="52" value="34" onchange="cargarSemana()">
+            </div>
+            
+            <div class="no-print" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn btn-gray" onclick="cerrarSesion()">Salir</button>
+                <button class="btn btn-orange admin-only" onclick="agregarFila()">+ Nuevo Registro</button>
+                <button class="btn btn-green" onclick="exportarExcel()">📊 Excel</button>
+                <button class="btn btn-gray" style="background:#ef4444;" onclick="window.print()">🖨️ PDF</button>
+            </div>
+        </div>
+
+        <!-- Panel Administrador -->
+        <div id="adminPanel" class="no-print admin-only">
+            <h3 style="margin:0 0 10px 0; color:var(--accent);">👑 Panel de Administrador</h3>
+            <p style="font-size: 0.85rem; color:var(--text-muted); margin:0;">Crea usuarios para que otros departamentos puedan visualizar este cuadro.</p>
+            <div class="admin-form">
+                <input type="text" id="newUsername" placeholder="Nuevo Usuario (ej. rh)" style="border:1px solid var(--border); border-radius:6px; flex:1; min-width:150px;">
+                <input type="text" id="newPassword" placeholder="Contraseña" style="border:1px solid var(--border); border-radius:6px; flex:1; min-width:150px;">
+                <select id="newRole" style="border:1px solid var(--border); border-radius:6px; width:150px; background:var(--primary); color:white; padding:8px;">
+                    <option value="lectura">Solo Lectura</option>
+                    <option value="admin">Administrador</option>
+                </select>
+                <button class="btn btn-orange" onclick="crearUsuario()">Crear Usuario</button>
+            </div>
+        </div>
+
+        <table id="tablaNominas">
+            <thead>
+                <tr>
+                    <th style="width: 18%;">Nombre Completo</th>
+                    <th style="width: 8%;">Lunes</th>
+                    <th style="width: 8%;">Martes</th>
+                    <th style="width: 8%;">Miércoles</th>
+                    <th style="width: 8%;">Jueves</th>
+                    <th style="width: 8%;">Viernes</th>
+                    <th style="width: 8%;">Sábado</th>
+                    <th style="width: 8%;">Domingo</th>
+                    <th style="width: 14%;">Punto de Venta</th>
+                    <th style="width: 10%;">Notas</th>
+                    <th class="no-print admin-only" style="width: 4%;">Acción</th>
+                </tr>
+            </thead>
+            <tbody id="tbodyNominas">
+                <!-- Se llena desde Firebase -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // --- 1. CONFIGURACIÓN DE FIREBASE ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyAHVPZwDeg2_7PYKkJvGH05WTLUglm_8Hw",
+            authDomain: "cuadro-celulrakits.firebaseapp.com",
+            databaseURL: "https://cuadro-celulrakits-default-rtdb.firebaseio.com",
+            projectId: "cuadro-celulrakits",
+            storageBucket: "cuadro-celulrakits.firebasestorage.app",
+            messagingSenderId: "659796619147",
+            appId: "1:659796619147:web:7073e2fac56b4d4c51c98e"
+        };
+        
+        if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+        const db = firebase.database();
+
+        let usuarioLogueado = null;
+        let rolUsuario = 'lectura'; 
+        let currentWeekRef = null;
+
+        // Lista de sucursales con mapeo de logos automático
+        const sucursales = [
+            { nombre: "AMÉRICAS", logo: "celular-kits.png" },
+            { nombre: "SAN LORENZO", logo: "celular-kits.png" },
+            { nombre: "MONUMENTAL", logo: "celular-kits.png" },
+            { nombre: "RÍO 1", logo: "celular-kits.png" },
+            { nombre: "RÍO 3", logo: "celular-kits.png" },
+            { nombre: "RÍO 5", logo: "celular-kits.png" },
+            { nombre: "RÍO 6", logo: "celular-kits.png" },
+            { nombre: "TOSKA 1", logo: "toska.png" },
+            { nombre: "TOSKA 2", logo: "toska.png" },
+            { nombre: "SHOTA", logo: "shota.png" },
+            { nombre: "COCOS", logo: "cocos.png" },
+            { nombre: "MIEL", logo: "miel.png" },
+            { nombre: "PAPIS", logo: "celular-kits.png" }
+        ];
+
+        // --- SISTEMA DE LOGIN Y ROLES ---
+        function iniciarSesion() {
+            const user = document.getElementById("loginUser").value.trim().toLowerCase();
+            const pass = document.getElementById("loginPass").value.trim();
+
+            if(user === "" || pass === "") return;
+
+            if(user === "admin" && pass === "admin123") {
+                usuarioLogueado = "admin"; 
+                rolUsuario = "admin";
+                document.getElementById("loginError").style.display = "none";
+                document.getElementById("loginScreen").style.display = "none";
+                document.getElementById("mainContainer").style.display = "block";
+                document.getElementById("currentUserDisplay").innerText = "ADMIN M.";
+                document.getElementById("roleDisplay").innerText = "ADMINISTRADOR";
+                aplicarRoles(); 
+                cargarSemana();
+                return;
+            }
+
+            db.ref('usuarios/' + user).once('value').then((snapshot) => {
+                if(snapshot.exists() && snapshot.val().password === pass) {
+                    usuarioLogueado = user;
+                    rolUsuario = snapshot.val().role || 'lectura'; 
+                    
+                    document.getElementById("loginError").style.display = "none";
+                    document.getElementById("loginScreen").style.display = "none";
+                    document.getElementById("mainContainer").style.display = "block";
+                    document.getElementById("currentUserDisplay").innerText = user.toUpperCase();
+                    document.getElementById("roleDisplay").innerText = rolUsuario.toUpperCase();
+
+                    aplicarRoles();
+                    cargarSemana();
+                } else {
+                    document.getElementById("loginError").style.display = "block";
+                }
+            }).catch(error => {
+                console.error("Error conectando a Firebase:", error);
+                document.getElementById("loginError").style.display = "block";
+            });
+        }
+
+        function cerrarSesion() {
+            usuarioLogueado = null;
+            if(currentWeekRef) currentWeekRef.off(); 
+            document.getElementById("mainContainer").style.display = "none";
+            document.getElementById("loginScreen").style.display = "flex";
+            document.getElementById("loginUser").value = "";
+            document.getElementById("loginPass").value = "";
+        }
+
+        function aplicarRoles() {
+            const adminElements = document.querySelectorAll('.admin-only');
+            if(rolUsuario === 'admin') {
+                adminElements.forEach(el => el.style.display = '');
+                document.getElementById('adminPanel').style.display = 'block';
+            } else {
+                adminElements.forEach(el => el.style.display = 'none');
+                document.getElementById('adminPanel').style.display = 'none';
+            }
+        }
+
+        function crearUsuario() {
+            const nUser = document.getElementById("newUsername").value.trim().toLowerCase();
+            const nPass = document.getElementById("newPassword").value.trim();
+            const nRole = document.getElementById("newRole").value;
+
+            if(nUser && nPass) {
+                db.ref('usuarios/' + nUser).set({
+                    password: nPass,
+                    role: nRole
+                }).then(() => {
+                    alert("Usuario " + nUser.toUpperCase() + " creado/actualizado con éxito.");
+                    document.getElementById("newUsername").value = "";
+                    document.getElementById("newPassword").value = "";
+                }).catch(error => {
+                    alert("Error al crear usuario.");
+                    console.error(error);
+                });
+            }
+        }
+
+        // --- LÓGICA DE LA TABLA ---
+        function cargarSemana() {
+            const semana = document.getElementById("inputSemana").value;
+            const tbody = document.getElementById("tbodyNominas");
+            tbody.innerHTML = "<tr><td colspan='11'>Cargando semana " + semana + " en tiempo real...</td></tr>";
+
+            if(currentWeekRef) currentWeekRef.off();
+
+            currentWeekRef = db.ref('horarios/semana_' + semana);
+            
+            currentWeekRef.on('value', (snapshot) => {
+                tbody.innerHTML = "";
+                const data = snapshot.val();
+                
+                if(data) {
+                    Object.keys(data).forEach(key => {
+                        dibujarFila(key, data[key]);
+                    });
+                } else {
+                    if(rolUsuario === 'admin') {
+                        tbody.innerHTML = "<tr><td colspan='11' style='color:#94a3b8; padding:20px;'>Semana vacía. Presiona '+ Nuevo Registro'.</td></tr>";
+                    } else {
+                        tbody.innerHTML = "<tr><td colspan='11' style='color:#94a3b8; padding:20px;'>No hay datos registrados en esta semana.</td></tr>";
+                    }
+                }
+            });
+        }
+
+        function dibujarFila(id, datosFila) {
+            const tbody = document.getElementById("tbodyNominas");
+            const tr = document.createElement("tr");
+            const disableAttr = (rolUsuario !== 'admin') ? 'disabled' : ''; 
+
+            let diasHtml = "";
+            const dias = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+            
+            dias.forEach(dia => {
+                const val = datosFila[dia] || "";
+                const descansoClass = val.toUpperCase().includes("DESCANSO") ? "is-descanso" : "";
+                diasHtml += `<td><input type="text" class="${descansoClass}" value="${val}" ${disableAttr} onchange="guardarCelda('${id}', '${dia}', this.value)" oninput="formatearDescanso(this)"></td>`;
+            });
+
+            // Encontrar el logo correspondiente a la sucursal actual
+            let logoActual = "celular-kits.png";
+            let opcionesPos = sucursales.map(suc => {
+                const isSelected = datosFila.pos === suc.nombre;
+                if(isSelected) logoActual = suc.logo;
+                return `<option value="${suc.nombre}" ${isSelected ? 'selected' : ''}>${suc.nombre}</option>`;
+            }).join('');
+
+            tr.innerHTML = `
+                <td style="text-align:left; padding-left:10px;"><input style="text-align:left;" type="text" value="${datosFila.nombre || ''}" ${disableAttr} onchange="guardarCelda('${id}', 'nombre', this.value)" placeholder="Nombre..."></td>
+                ${diasHtml}
+                <td>
+                    <div class="pos-cell-container">
+                        <select ${disableAttr} onchange="guardarCelda('${id}', 'pos', this.value)">
+                            <option value="">Seleccionar...</option>
+                            ${opcionesPos}
+                        </select>
+                        <img src="${logoActual}" class="pos-logo-mini" alt="Logo" onerror="this.style.display='none'">
+                    </div>
+                </td>
+                <td><input type="text" value="${datosFila.notas || ''}" ${disableAttr} onchange="guardarCelda('${id}', 'notas', this.value)"></td>
+                <td class="no-print admin-only" style="${rolUsuario === 'admin' ? '' : 'display:none;'}">
+                    <button style="background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer; padding:5px 10px;" onclick="eliminarFila('${id}')">X</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        }
+
+        function agregarFila() {
+            if(rolUsuario !== 'admin') return;
+            const semana = document.getElementById("inputSemana").value;
+            const nuevoId = db.ref('horarios/semana_' + semana).push().key;
+            
+            db.ref(`horarios/semana_${semana}/${nuevoId}`).set({
+                nombre: "", lunes: "", martes: "", miercoles: "", jueves: "", viernes: "", sabado: "", domingo: "", pos: "", notas: ""
+            });
+        }
+
+        function guardarCelda(idFila, campo, valor) {
+            if(rolUsuario !== 'admin') return;
+            const semana = document.getElementById("inputSemana").value;
+            db.ref(`horarios/semana_${semana}/${idFila}/${campo}`).set(valor);
+        }
+
+        function eliminarFila(idFila) {
+            if(rolUsuario !== 'admin') return;
+            if(confirm("¿Seguro que deseas eliminar este registro?")) {
+                const semana = document.getElementById("inputSemana").value;
+                db.ref(`horarios/semana_${semana}/${idFila}`).remove();
+            }
+        }
+
+        function formatearDescanso(input) {
+            input.value = input.value.toUpperCase();
+            if (input.value.includes("DESCANSO")) {
+                input.classList.add("is-descanso");
+            } else {
+                input.classList.remove("is-descanso");
+            }
+        }
+
+        function exportarExcel() {
+            const semana = document.getElementById("inputSemana").value;
+            const tabla = document.getElementById("tablaNominas");
+            const data = [];
+            
+            const headers = [];
+            tabla.querySelectorAll("thead th").forEach((th, index) => {
+                if (index < 10) headers.push(th.innerText);
+            });
+            data.push(headers);
+
+            const filas = tabla.querySelectorAll("tbody tr");
+            filas.forEach(tr => {
+                const filaData = [];
+                const celdas = tr.querySelectorAll("td");
+                
+                celdas.forEach((td, index) => {
+                    if (index < 10) { 
+                        const input = td.querySelector("input[type='text']");
+                        const select = td.querySelector("select");
+                        if (input) filaData.push(input.value);
+                        else if (select) filaData.push(select.value);
+                        else filaData.push(td.innerText);
+                    }
+                });
+                if(filaData.length > 0 && filaData[0] !== "Cargando semana " + semana + " en tiempo real...") {
+                    data.push(filaData);
+                }
+            });
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, "Semana " + semana);
+            XLSX.writeFile(wb, `Cuadro_Semana_${semana}_CelularKits.xlsx`);
+        }
+    </script>
+</body>
+</html>
